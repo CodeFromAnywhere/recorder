@@ -3,7 +3,7 @@ Attempt to create a screen recorder from browser that streams the recording to c
 TODO:
 
 - ✅ Got it to stream and store result in chunks of up to 10MB in R2
-- Figure out if it's possible to `append` a chunk to another chunk (or maybe use [multipart upload](https://developers.cloudflare.com/r2/api/workers/workers-api-reference/#r2multipartupload-definition))
+- Figure out if it's possible to `append` a chunk to another chunk (or maybe use [multipart upload](https://developers.cloudflare.com/r2/api/workers/workers-api-reference/#r2multipartupload-definition)). I also had some other way [here](https://github.com/CodeFromAnywhere/cloudflare-youtube-ffmpeg) which could be by streaming multiple urls to a single URL, then another worker could just do a direct upload from that URL. by streaming it directly, there's not a lot of memory used.
 - Figure out the encoding format so the generated mp4 can always be played
 - Make ux nicer with better configuration options (such as toggle audio, toggle video, toggle camera, resolution). Also per video allow public/unlisted.
 - Put this behind a github login so recordings get put behind github user ID and are accessible via a public (unlisted) URL. On cloudrecorder.com/[owner] we could list all public videos of a person or also private if you're logged in.
