@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cloud Screen Recorder</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body class="bg-gray-100 min-h-screen p-8">
+    <div class="max-w-2xl mx-auto bg-white rounded-lg shadow-md p-6">
+        <h1 class="text-2xl font-bold mb-6 text-gray-800">Cloud Screen Recorder</h1>
+
+        <div class="space-y-4">
+            <div class="flex items-center space-x-4">
+                <button id="setupBtn"
+                    class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 focus:outline-none">
+                    Setup Recording
+                </button>
+                <button id="startBtn"
+                    class="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 focus:outline-none" disabled>
+                    Start Recording
+                </button>
+                <button id="stopBtn" class="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 focus:outline-none"
+                    disabled>
+                    Stop Recording
+                </button>
+            </div>
+
+            <div id="status" class="text-gray-600">Ready to setup</div>
+
+            <div class="border rounded p-4">
+                <h2 class="font-semibold mb-2">Settings</h2>
+                <div class="space-y-2">
+                    <div>
+                        <label class="block text-sm text-gray-600">WebSocket Server URL:</label>
+                        <input type="text" id="wsUrl" class="mt-1 block w-full rounded border-gray-300 shadow-sm p-2"
+                            value="wss://recorder.githuq.workers.dev/record" />
+                    </div>
+                    <div>
+                        <label class="block text-sm text-gray-600">Video Bitrate (bits/sec):</label>
+                        <input type="number" id="bitrate"
+                            class="mt-1 block w-full rounded border-gray-300 shadow-sm p-2" value="2500000" />
+                    </div>
+                </div>
+            </div>
+
+            <div id="previewContainer" class="hidden border rounded p-4">
+                <h2 class="font-semibold mb-2">Preview</h2>
+                <video id="preview" class="w-full rounded" autoplay muted></video>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let mediaRecorder;
+        let socket;
+        let stream;
+        let selectedMimeType = null;
+
+        const setupBtn = document.getElementById('setupBtn');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const status = document.getElementById('status');
+        const wsUrlInput = document.getElementById('wsUrl');
+        const bitrateInput = document.getElementById('bitrate');
+        const previewContainer = document.getElementById('previewContainer');
+        const preview = document.getElementById('preview');
+
+        async function setupRecording() {
+            try {
+                // Reset any existing stream
+                if (stream) {
+                    stream.getTracks().forEach(track => track.stop());
+                }
+
+                // Get screen capture stream with permission prompt
+                stream = await navigator.mediaDevices.getDisplayMedia({
+                    video: {
+                        cursor: "always"
+                    },
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true
+                    }
+                });
+
+                // Show preview
+                preview.srcObject = stream;
+                previewContainer.classList.remove('hidden');
+
+                // Enable start button
+                setupBtn.disabled = true;
+                startBtn.disabled = false;
+                status.textContent = 'Ready to record. Click Start Recording when ready.';
+
+                // Find supported MIME type
+                const mimeTypes = [
+                    'video/webm;codecs=vp9,opus',
+                    'video/webm;codecs=vp8,opus',
+                    'video/webm;codecs=h264,opus',
+                    'video/webm',
+                    'video/mp4',
+                    'video/mp4;codecs=h264',
+                    'video/mp4;codecs=avc1'
+                ];
+
+                for (const mimeType of mimeTypes) {
+                    if (MediaRecorder.isTypeSupported(mimeType)) {
+                        selectedMimeType = mimeType;
+                        break;
+                    }
+                }
+
+                if (!selectedMimeType) {
+                    throw new Error('No supported MIME type found for recording');
+                }
+
+                console.log('Using MIME type:', selectedMimeType);
+
+
+                // Handle if user stops sharing through the browser UI
+                stream.getVideoTracks()[0].onended = () => {
+                    stopRecording();
+                    setupBtn.disabled = false;
+                    startBtn.disabled = true;
+                    previewContainer.classList.add('hidden');
+                    status.textContent = 'Screen sharing stopped. Click Setup Recording to start over.';
+                };
+
+            } catch (err) {
+                console.error('Setup Error:', err);
+                if (err.name === 'NotAllowedError') {
+                    status.textContent = 'Permission denied. Please allow screen sharing to record.';
+                } else {
+                    status.textContent = 'Error during setup! Check console for details.';
+                }
+                setupBtn.disabled = false;
+                startBtn.disabled = true;
+            }
+        }
+
+        async function startRecording() {
+            try {
+                // Connect to WebSocket server
+                socket = new WebSocket(wsUrlInput.value);
+
+                socket.onopen = async () => {
+
+                    console.log('Using MIME type:', selectedMimeType);
+
+                    // Configure MediaRecorder with specified bitrate and supported mime type
+                    const options = {
+                        mimeType: selectedMimeType,
+                        videoBitsPerSecond: parseInt(bitrateInput.value)
+                    };
+
+                    mediaRecorder = new MediaRecorder(stream, options);
+
+                    // Send each recorded chunk to the WebSocket server
+                    mediaRecorder.ondataavailable = (event) => {
+                        if (event.data.size > 0) {
+                            socket.send(event.data);
+                        }
+                    };
+
+                    // Handle stopping
+                    mediaRecorder.onstop = () => {
+                        stream.getTracks().forEach(track => track.stop());
+                        socket.close();
+                        status.textContent = 'Recording stopped';
+                        setupBtn.disabled = false;
+                        startBtn.disabled = true;
+                        stopBtn.disabled = true;
+                        previewContainer.classList.add('hidden');
+                    };
+
+                    // Start recording
+                    mediaRecorder.start(1000); // Send chunks every second
+                    status.textContent = 'Recording...';
+                    setupBtn.disabled = true;
+                    startBtn.disabled = true;
+                    stopBtn.disabled = false;
+                };
+
+                socket.onerror = (error) => {
+                    console.error('WebSocket Error:', error);
+                    status.textContent = 'WebSocket Error! Check console for details.';
+                    stopRecording();
+                };
+
+                socket.onclose = () => {
+                    status.textContent = 'WebSocket Connection Closed';
+                    stopRecording();
+                };
+
+            } catch (err) {
+                console.error('Error:', err);
+                if (err.message === 'No supported MIME type found for recording') {
+                    status.textContent = 'Your browser does not support any available recording formats. Try Chrome or Firefox.';
+                } else if (err.name === 'NotSupportedError') {
+                    status.textContent = 'Recording format not supported. Try Chrome or Firefox.';
+                } else {
+                    status.textContent = 'Error! Check console for details.';
+                }
+                stopRecording();
+            }
+        }
+
+        function stopRecording() {
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+            }
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.close();
+            }
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+            setupBtn.disabled = false;
+            startBtn.disabled = true;
+            stopBtn.disabled = true;
+            previewContainer.classList.add('hidden');
+        }
+
+        setupBtn.onclick = setupRecording;
+        startBtn.onclick = startRecording;
+        stopBtn.onclick = stopRecording;
+    </script>
+</body>
+
+</html>
