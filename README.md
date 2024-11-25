@@ -1,4 +1,4 @@
-Attempt to create a screen recorder from browser that streams the recording to cloud storage for later processing.
+Attempt to create a screen recorder from browser that streams the recording to cloud storage for AI processing.
 
 TODO:
 
